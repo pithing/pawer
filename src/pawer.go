@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -97,7 +98,10 @@ func main() {
 	tmp, _ := net.ResolveTCPAddr("tcp", "0.0.0.0:5555")
 	go OneWayReadIO()
 	go func() {
-		time.Sleep(8000)
+		t := time.Tick(4 * time.Second)
+		select {
+		case <-t:
+		}
 		//测试
 		var tcpAddr *net.TCPAddr
 		tcpAddr, _ = net.ResolveTCPAddr("tcp", "127.0.0.1:39500")
@@ -116,7 +120,11 @@ func main() {
 				Remote:  tmp,
 			}
 			p.Pack(writer)
-			time.Sleep(1000)
+			t = time.Tick(1 * time.Second)
+			select {
+			case <-t:
+				println("send packet")
+			}
 		}
 	}()
 	select {}
@@ -167,5 +175,5 @@ func OneWayReadIO() {
 
 //单向包接收处理
 func OneWayReadProcessIO(p *Package) {
-
+	log.Println(p)
 }
