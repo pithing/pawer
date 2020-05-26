@@ -23,7 +23,7 @@ var Config = ConfDefault()
 // n data
 type Package struct {
 	Version [8]byte      // 协议版本 0xCC 0x05 0x20 0x13 0x14 0x00 0x00 0xCC
-	Type    int8         //包类型  0请求 1相应 2心跳 3断开
+	Type    uint8        //包类型  0请求 1相应 2心跳 3断开
 	Local   *net.TCPAddr //发起端地址
 	Remote  *net.TCPAddr //接收端地址
 	Data    []byte       // 数据

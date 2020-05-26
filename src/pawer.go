@@ -13,7 +13,7 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		remote, err := net.ResolveTCPAddr("tcp", link.Local)
+		remote, err := net.ResolveTCPAddr("tcp", link.Remote)
 		if err != nil {
 			panic(err)
 		}

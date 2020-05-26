@@ -13,6 +13,7 @@ var Remotes map[string]net.Conn
 func BreakHeart() {
 	zero, _ := net.ResolveTCPAddr("tcp", "0.0.0.0:0")
 	for {
+		time.Sleep(time.Second * 28)
 		Way.Sender <- &Package{
 			Type:   0xC0,
 			Data:   []byte{},
@@ -30,7 +31,6 @@ func BreakHeart() {
 			time.Sleep(time.Second * 5)
 			_ = (&os.Process{Pid: os.Getpid()}).Kill()
 		}
-		time.Sleep(time.Second * 28)
 	}
 }
 
@@ -38,9 +38,9 @@ func OnWayReceive(packet *Package) {
 	user := packet.Local.String()
 	switch packet.Type {
 	case 0: //请求
-		remote := Remotes[user]
+		remote, has := Remotes[user]
 		var err error
-		if remote == nil {
+		if !has {
 			conn, err := net.DialTCP("tcp", nil, packet.Remote)
 			if err != nil {
 				remote = conn
@@ -63,8 +63,8 @@ func OnWayReceive(packet *Package) {
 		}
 		break
 	case 1: //响应
-		client := Clients[user]
-		if client != nil {
+		client, has := Clients[user]
+		if has {
 			_, _ = client.Write(packet.Data)
 		}
 		break
@@ -75,8 +75,8 @@ func OnWayReceive(packet *Package) {
 		_ = (&os.Process{Pid: os.Getpid()}).Kill()
 		break
 	case 0xFF: //断开
-		client := Clients[user]
-		if client != nil {
+		client, has := Clients[user]
+		if has {
 			_ = client.Close()
 			delete(Clients, user)
 		}
