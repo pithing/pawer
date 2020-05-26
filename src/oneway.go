@@ -57,6 +57,9 @@ func (way OneWay) sendWayIo() {
 						_ = remote.Close()
 					}
 					remote, err = net.DialTCP("tcp", nil, way.RemoteAddr)
+					if err != nil {
+						continue
+					}
 					writer = bufio.NewWriter(remote)
 				}
 				err = packet.Pack(writer)
@@ -69,7 +72,7 @@ func (way OneWay) sendWayIo() {
 }
 
 //监听队列
-func (way OneWay) readWayIo() () {
+func (way OneWay) readWayIo() {
 	var local net.Conn
 	var listener *net.TCPListener
 	var err error

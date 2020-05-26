@@ -7,8 +7,8 @@ import (
 )
 
 var Timer int64
-var Clients map[string]net.Conn
-var Remotes map[string]net.Conn
+var Clients map[string]net.Conn = make(map[string]net.Conn)
+var Remotes map[string]net.Conn = make(map[string]net.Conn)
 
 func BreakHeart() {
 	zero, _ := net.ResolveTCPAddr("tcp", "0.0.0.0:0")
