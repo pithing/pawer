@@ -45,9 +45,8 @@ func OnWayReceive(packet *Package) {
 			conn, err = net.DialTCP("tcp", nil, packet.Remote)
 			remote = conn
 			Remotes[user] = remote
-		} else {
-			_, err = remote.Write(packet.Data)
 		}
+		_, err = remote.Write(packet.Data)
 		if err != nil {
 			if remote != nil {
 				_ = remote.Close()
