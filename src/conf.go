@@ -17,8 +17,8 @@ type Conf struct {
 	Link    []Link
 }
 type Link struct {
-	Bind   int
-	Remote string
+	Local   string
+	Remote  string
 }
 
 func ConfDefault() Conf {
