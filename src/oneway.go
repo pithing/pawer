@@ -85,6 +85,7 @@ func (way OneWay) readWayIo() {
 	for {
 		if way.LocalAddr.String() != "0.0.0.0:0" {
 			way.local, err = listener.AcceptTCP()
+			local = way.local
 		} else {
 			//本地不监听，主动链接后使用链接的conn发送和接收数据
 			local = way.remote

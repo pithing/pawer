@@ -20,7 +20,7 @@ func main() {
 		go Transfer(local, remote)
 	}
 	//开启心跳
-	go BreakHeart()
+	//go BreakHeart()
 	//来自单向的数据包
 	for {
 		select {

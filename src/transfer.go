@@ -40,14 +40,14 @@ func OnWayReceive(packet *Package) {
 	case 0: //请求
 		remote, has := Remotes[user]
 		var err error
+		var conn *net.TCPConn
 		if !has {
-			conn, err := net.DialTCP("tcp", nil, packet.Remote)
-			if err != nil {
-				remote = conn
-				Remotes[user] = remote
-			}
+			conn, err = net.DialTCP("tcp", nil, packet.Remote)
+			remote = conn
+			Remotes[user] = remote
+		} else {
+			_, err = remote.Write(packet.Data)
 		}
-		_, err = remote.Write(packet.Data)
 		if err != nil {
 			if remote != nil {
 				_ = remote.Close()
@@ -101,8 +101,8 @@ func ClientIO(client *net.TCPConn, remoteAddr *net.TCPAddr) {
 	ipAddr := client.RemoteAddr().String()
 	localAddr, _ := net.ResolveTCPAddr("tcp", ipAddr)
 	Clients[ipAddr] = client
+	buffer := make([]byte, 1024)
 	for {
-		buffer := make([]byte, 1024)
 		count, err := client.Read(buffer)
 		if err != nil {
 			break

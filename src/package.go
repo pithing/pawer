@@ -60,6 +60,7 @@ func IPAddrFromInt(ip uint32) string {
 }
 
 func (packet *Package) Pack(writer *bufio.Writer) error {
+	packet.Version = Config.Version
 	var err error
 	err = binary.Write(writer, binary.BigEndian, packet.Version)
 	err = binary.Write(writer, binary.BigEndian, packet.Type)
@@ -74,6 +75,7 @@ func (packet *Package) Pack(writer *bufio.Writer) error {
 	return err
 }
 func (packet *Package) UnPack(reader io.Reader) error {
+	packet.Version = Config.Version
 	var err error
 	err = binary.Read(reader, binary.BigEndian, &packet.Version)
 	err = binary.Read(reader, binary.BigEndian, &packet.Type)

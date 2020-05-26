@@ -1,13 +1,13 @@
 package main
 
 import (
-	"fmt"
 	"io/ioutil"
 	"os"
 
+	"runtime"
+
 	"github.com/BurntSushi/toml"
 	"github.com/axgle/mahonia"
-	"runtime"
 )
 
 type Conf struct {
@@ -17,8 +17,8 @@ type Conf struct {
 	Link    []Link
 }
 type Link struct {
-	Local   string
-	Remote  string
+	Local  string
+	Remote string
 }
 
 func ConfDefault() Conf {
@@ -29,7 +29,6 @@ func ConfDefault() Conf {
 	if runtime.GOOS == "windows" {
 		enc := mahonia.NewDecoder("gbk")
 		_, data, _ := enc.Translate(b, true)
-		fmt.Println(string(data))
 		_, err := toml.Decode(string(data), &cf)
 		if err != nil {
 			panic(err)
