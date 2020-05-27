@@ -3,12 +3,38 @@ package main
 import (
 	"net"
 	"os"
+	"sync"
 	"time"
 )
 
-var Timer int64
-var Clients map[string]net.Conn = make(map[string]net.Conn)
-var Remotes map[string]net.Conn = make(map[string]net.Conn)
+type MapMutex struct {
+	Data map[string]net.Conn
+	Lock sync.RWMutex
+}
+
+func (d *MapMutex) Get(k string) (net.Conn, bool) {
+	d.Lock.RLock()
+	defer d.Lock.RUnlock()
+	item, has := d.Data[k]
+	return item, has
+}
+
+func (d *MapMutex) Set(k string, v net.Conn) {
+	d.Lock.Lock()
+	defer d.Lock.Unlock()
+	d.Data[k] = v
+}
+
+func (d *MapMutex) Remove(k string) {
+	d.Lock.Lock()
+	defer d.Lock.Unlock()
+	delete(d.Data, k)
+}
+
+var Timer int64 = time.Now().Unix()
+
+var Clients MapMutex = MapMutex{Data: make(map[string]net.Conn), Lock: sync.RWMutex{}}
+var Remotes MapMutex = MapMutex{Data: make(map[string]net.Conn), Lock: sync.RWMutex{}}
 
 func BreakHeart() {
 	zero, _ := net.ResolveTCPAddr("tcp", "0.0.0.0:0")
@@ -38,20 +64,37 @@ func OnWayReceive(packet *Package) {
 	user := packet.Local.String()
 	switch packet.Type {
 	case 0: //请求
-		remote, has := Remotes[user]
+		remote, has := Remotes.Get(user)
 		var err error
 		var conn *net.TCPConn
 		if !has {
 			conn, err = net.DialTCP("tcp", nil, packet.Remote)
 			remote = conn
-			Remotes[user] = remote
+			Remotes.Set(user, remote)
+			//开启接收
+			go func() {
+				for {
+					buffer := make([]byte, 1024)
+					count, err := conn.Read(buffer)
+					if err != nil {
+						break
+					}
+					//发送报文信息
+					Way.Sender <- &Package{
+						Type:   1,
+						Data:   buffer[:count],
+						Local:  packet.Local,
+						Remote: packet.Remote,
+					}
+				}
+			}()
 		}
 		_, err = remote.Write(packet.Data)
 		if err != nil {
 			if remote != nil {
 				_ = remote.Close()
 			}
-			delete(Remotes, user)
+			Remotes.Remove(user)
 			//发送断开链接
 			Way.Sender <- &Package{
 				Type:   0xff,
@@ -62,9 +105,13 @@ func OnWayReceive(packet *Package) {
 		}
 		break
 	case 1: //响应
-		client, has := Clients[user]
+		client, has := Clients.Get(user)
 		if has {
-			_, _ = client.Write(packet.Data)
+			_, err := client.Write(packet.Data)
+			if err != nil {
+				_ = client.Close()
+				Clients.Remove(user)
+			}
 		}
 		break
 	case 0xC0: //心跳
@@ -74,10 +121,10 @@ func OnWayReceive(packet *Package) {
 		_ = (&os.Process{Pid: os.Getpid()}).Kill()
 		break
 	case 0xFF: //断开
-		client, has := Clients[user]
+		client, has := Clients.Get(user)
 		if has {
 			_ = client.Close()
-			delete(Clients, user)
+			Clients.Remove(user)
 		}
 		break
 	}
@@ -97,9 +144,9 @@ func Transfer(local *net.TCPAddr, remote *net.TCPAddr) {
 }
 
 func ClientIO(client *net.TCPConn, remoteAddr *net.TCPAddr) {
-	ipAddr := client.RemoteAddr().String()
-	localAddr, _ := net.ResolveTCPAddr("tcp", ipAddr)
-	Clients[ipAddr] = client
+	user := client.RemoteAddr().String()
+	localAddr, _ := net.ResolveTCPAddr("tcp", user)
+	Clients.Set(user, client)
 	buffer := make([]byte, 1024)
 	for {
 		count, err := client.Read(buffer)
@@ -114,7 +161,7 @@ func ClientIO(client *net.TCPConn, remoteAddr *net.TCPAddr) {
 			Remote: remoteAddr,
 		}
 	}
-	delete(Clients, ipAddr)
+	Clients.Remove(user)
 	//发送断开链接
 	Way.Sender <- &Package{
 		Type:   0xff,

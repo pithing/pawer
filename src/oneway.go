@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"net"
+	"time"
 )
 
 type OneWay struct {
@@ -32,8 +33,8 @@ func (way OneWay) Default(localAddr string, remoteAddr string) *OneWay {
 
 	way.Sender = make(chan *Package)
 	way.Reader = make(chan *Package)
-	go way.sendWayIo()
 	go way.readWayIo()
+	go way.sendWayIo()
 	return &way
 }
 
@@ -49,6 +50,10 @@ func (way OneWay) sendWayIo() {
 				if way.RemoteAddr.String() == "0.0.0.0:0" {
 					//不链接远端，接收到conn后使用此链接发送和接收数据
 					remote = way.local
+					if remote == nil {
+						time.Sleep(time.Second)
+						continue
+					}
 				} else {
 					remote = way.remote
 				}
@@ -56,12 +61,13 @@ func (way OneWay) sendWayIo() {
 					if remote != nil {
 						_ = remote.Close()
 					}
-					remote, err = net.DialTCP("tcp", nil, way.RemoteAddr)
+					way.remote, err = net.DialTCP("tcp", nil, way.RemoteAddr)
 					if err != nil {
 						continue
 					}
-					writer = bufio.NewWriter(remote)
+					remote = way.remote
 				}
+				writer = bufio.NewWriter(way.remote)
 				err = packet.Pack(writer)
 				if err == nil {
 					break
@@ -90,7 +96,8 @@ func (way OneWay) readWayIo() {
 			//本地不监听，主动链接后使用链接的conn发送和接收数据
 			local = way.remote
 		}
-		if err != nil {
+		if err != nil || local == nil {
+			time.Sleep(time.Second)
 			continue
 		}
 		scanner := bufio.NewScanner(local)
@@ -104,7 +111,7 @@ func (way OneWay) readWayIo() {
 				length := int32(0)
 				_ = binary.Read(bytes.NewReader(data[index+header:index+header+4]), binary.BigEndian, &length)
 				total := header + 4 + int(length)
-				if total <= len(data) {
+				if index+total <= len(data) {
 					return index + total, data[index : index+total], nil
 				}
 			}
