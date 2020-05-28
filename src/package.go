@@ -43,16 +43,16 @@ func IPAddrToInt(ip string) uint32 {
 }
 func IPAddrFromInt(ip uint32) string {
 	scope := make([]string, 4)
-	var len = len(scope)
+	var length = len(scope)
 	buffer := bytes.NewBufferString("")
-	for i := 0; i < len; i++ {
+	for i := 0; i < length; i++ {
 		tempInt := ip & 0xFF
-		scope[len-i-1] = strconv.Itoa(int(tempInt))
+		scope[length-i-1] = strconv.Itoa(int(tempInt))
 		ip = ip >> 8
 	}
-	for i := 0; i < len; i++ {
+	for i := 0; i < length; i++ {
 		buffer.WriteString(scope[i])
-		if i < len-1 {
+		if i < length-1 {
 			buffer.WriteString(".")
 		}
 	}
@@ -69,7 +69,6 @@ func (packet *Package) Pack(writer *bufio.Writer) error {
 	err = binary.Write(writer, binary.BigEndian, uint32(IPAddrToInt(packet.Remote.IP.String())))
 	err = binary.Write(writer, binary.BigEndian, uint16(packet.Remote.Port))
 	err = binary.Write(writer, binary.BigEndian, int32(len(packet.Data)))
-	err = binary.Write(writer, binary.BigEndian, packet.Data)
 	err = binary.Write(writer, binary.BigEndian, packet.Data)
 	err = writer.Flush()
 	return err

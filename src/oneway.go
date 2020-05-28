@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"net"
+	"reflect"
 	"time"
 )
 
@@ -20,7 +21,7 @@ type OneWay struct {
 	Reader     chan *Package //接收通道
 }
 
-func (way OneWay) Default(localAddr string, remoteAddr string) *OneWay {
+func (way OneWay) Default(localAddr string, remoteAddr string) OneWay {
 	var err error
 	way.LocalAddr, err = net.ResolveTCPAddr("tcp", localAddr)
 	if err != nil {
@@ -35,11 +36,11 @@ func (way OneWay) Default(localAddr string, remoteAddr string) *OneWay {
 	way.Reader = make(chan *Package)
 	go way.readWayIo()
 	go way.sendWayIo()
-	return &way
+	return way
 }
 
 //发送队列
-func (way OneWay) sendWayIo() {
+func (way *OneWay) sendWayIo() {
 	var err error
 	var writer *bufio.Writer
 	for {
@@ -57,7 +58,7 @@ func (way OneWay) sendWayIo() {
 				} else {
 					remote = way.remote
 				}
-				if remote == nil || err != nil {
+				if reflect.ValueOf(remote).IsNil() || err != nil {
 					if remote != nil {
 						_ = remote.Close()
 					}
@@ -66,8 +67,9 @@ func (way OneWay) sendWayIo() {
 						continue
 					}
 					remote = way.remote
+					_ = remote.SetKeepAlive(true)
 				}
-				writer = bufio.NewWriter(way.remote)
+				writer = bufio.NewWriter(remote)
 				err = packet.Pack(writer)
 				if err == nil {
 					break
@@ -78,7 +80,7 @@ func (way OneWay) sendWayIo() {
 }
 
 //监听队列
-func (way OneWay) readWayIo() {
+func (way *OneWay) readWayIo() {
 	var local net.Conn
 	var listener *net.TCPListener
 	var err error
@@ -96,21 +98,21 @@ func (way OneWay) readWayIo() {
 			//本地不监听，主动链接后使用链接的conn发送和接收数据
 			local = way.remote
 		}
-		if err != nil || local == nil {
+		if err != nil || reflect.ValueOf(local).IsNil() {
 			time.Sleep(time.Second)
 			continue
 		}
 		scanner := bufio.NewScanner(local)
 		scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
-			header := len(way.Version) + 13
+			header := len(way.Version) + 17
 			if !atEOF && len(data) > header {
 				index := bytes.Index(data, way.Version[:])
 				if index < 0 {
 					return
 				}
 				length := int32(0)
-				_ = binary.Read(bytes.NewReader(data[index+header:index+header+4]), binary.BigEndian, &length)
-				total := header + 4 + int(length)
+				_ = binary.Read(bytes.NewReader(data[index+header-4:index+header]), binary.BigEndian, &length)
+				total := header + int(length)
 				if index+total <= len(data) {
 					return index + total, data[index : index+total], nil
 				}

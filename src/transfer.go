@@ -31,10 +31,11 @@ func (d *MapMutex) Remove(k string) {
 	delete(d.Data, k)
 }
 
-var Timer int64 = time.Now().Unix()
+var Timer = time.Now().Unix()
 
-var Clients MapMutex = MapMutex{Data: make(map[string]net.Conn), Lock: sync.RWMutex{}}
-var Remotes MapMutex = MapMutex{Data: make(map[string]net.Conn), Lock: sync.RWMutex{}}
+var Clients = MapMutex{Data: make(map[string]net.Conn), Lock: sync.RWMutex{}}
+var Remotes = MapMutex{Data: make(map[string]net.Conn), Lock: sync.RWMutex{}}
+var BufferSize = 4096
 
 func BreakHeart() {
 	zero, _ := net.ResolveTCPAddr("tcp", "0.0.0.0:0")
@@ -69,12 +70,23 @@ func OnWayReceive(packet *Package) {
 		var conn *net.TCPConn
 		if !has {
 			conn, err = net.DialTCP("tcp", nil, packet.Remote)
+			if err != nil {
+				//发送断开链接
+				Way.Sender <- &Package{
+					Type:   0xff,
+					Data:   []byte{},
+					Local:  packet.Local,
+					Remote: packet.Remote,
+				}
+				return
+			}
 			remote = conn
+			_ = conn.SetKeepAlive(true)
 			Remotes.Set(user, remote)
 			//开启接收
 			go func() {
 				for {
-					buffer := make([]byte, 1024)
+					buffer := make([]byte, BufferSize)
 					count, err := conn.Read(buffer)
 					if err != nil {
 						break
@@ -139,6 +151,7 @@ func Transfer(local *net.TCPAddr, remote *net.TCPAddr) {
 		if err != nil {
 			panic(err)
 		}
+		_ = client.SetKeepAlive(true)
 		go ClientIO(client, remote)
 	}
 }
@@ -147,7 +160,7 @@ func ClientIO(client *net.TCPConn, remoteAddr *net.TCPAddr) {
 	user := client.RemoteAddr().String()
 	localAddr, _ := net.ResolveTCPAddr("tcp", user)
 	Clients.Set(user, client)
-	buffer := make([]byte, 1024)
+	buffer := make([]byte, BufferSize)
 	for {
 		count, err := client.Read(buffer)
 		if err != nil {

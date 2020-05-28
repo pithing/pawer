@@ -1,12 +1,15 @@
 package main
 
-import "net"
+import (
+	"net"
+)
 
 var Way = OneWay{
 	Version: Config.Version,
 }.Default(Config.Local, Config.Remote)
 
 func main() {
+
 	//开启本地监听服务
 	for _, link := range Config.Link {
 		local, err := net.ResolveTCPAddr("tcp", link.Local)
