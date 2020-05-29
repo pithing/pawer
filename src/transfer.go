@@ -3,39 +3,71 @@ package main
 import (
 	"net"
 	"os"
-	"sync"
 	"time"
 )
 
-type MapMutex struct {
-	Data map[string]net.Conn
-	Lock sync.RWMutex
-}
-
-func (d *MapMutex) Get(k string) (net.Conn, bool) {
-	d.Lock.RLock()
-	defer d.Lock.RUnlock()
-	item, has := d.Data[k]
-	return item, has
-}
-
-func (d *MapMutex) Set(k string, v net.Conn) {
-	d.Lock.Lock()
-	defer d.Lock.Unlock()
-	d.Data[k] = v
-}
-
-func (d *MapMutex) Remove(k string) {
-	d.Lock.Lock()
-	defer d.Lock.Unlock()
-	delete(d.Data, k)
-}
-
 var Timer = time.Now().Unix()
 
-var Clients = MapMutex{Data: make(map[string]net.Conn), Lock: sync.RWMutex{}}
-var Remotes = MapMutex{Data: make(map[string]net.Conn), Lock: sync.RWMutex{}}
-var BufferSize = 4096
+var Clients = make(map[string]chan *Package)
+var Remotes = make(map[string]chan *Package)
+var BufferSize = 1024 * 512
+
+func ChanIO(source map[string]chan *Package, local *net.TCPAddr, remote *net.TCPAddr, packet *Package) {
+	disconnect := func() {
+		Way.Sender <- &Package{
+			Type:   0xff,
+			Data:   []byte{},
+			Local:  local,
+			Remote: remote,
+		}
+	}
+	radix := func(client *net.TCPConn) {
+		buffer := make([]byte, BufferSize)
+		for {
+			count, err := client.Read(buffer)
+			if err != nil {
+				disconnect()
+				break
+			}
+			Way.Sender <- &Package{
+				Type:   1,
+				Data:   buffer[:count],
+				Local:  local,
+				Remote: remote,
+			}
+		}
+	}
+	var user = local.String()
+	var client *net.TCPConn
+	var err error
+	for {
+		item := source[user]
+		if item == nil {
+			source[user] = make(chan *Package)
+			item = source[user]
+			if packet != nil {
+				item <- packet
+			}
+			client, err = net.DialTCP("tcp", nil, remote)
+			if err != nil {
+				disconnect()
+				break
+			}
+			_ = client.SetKeepAlive(true)
+			go radix(client)
+		}
+		select {
+		case packet := <-item:
+			_, err = client.Write(packet.Data)
+			if err != nil {
+				disconnect()
+				break
+			}
+			continue
+		}
+		break
+	}
+}
 
 func BreakHeart() {
 	zero, _ := net.ResolveTCPAddr("tcp", "0.0.0.0:0")
@@ -65,65 +97,17 @@ func OnWayReceive(packet *Package) {
 	user := packet.Local.String()
 	switch packet.Type {
 	case 0: //请求
-		remote, has := Remotes.Get(user)
-		var err error
-		var conn *net.TCPConn
+		remote, has := Remotes[user]
 		if !has {
-			conn, err = net.DialTCP("tcp", nil, packet.Remote)
-			if err != nil {
-				//发送断开链接
-				Way.Sender <- &Package{
-					Type:   0xff,
-					Data:   []byte{},
-					Local:  packet.Local,
-					Remote: packet.Remote,
-				}
-				return
-			}
-			remote = conn
-			_ = conn.SetKeepAlive(true)
-			Remotes.Set(user, remote)
-			//开启接收
-			go func() {
-				for {
-					buffer := make([]byte, BufferSize)
-					count, err := conn.Read(buffer)
-					if err != nil {
-						break
-					}
-					//发送报文信息
-					Way.Sender <- &Package{
-						Type:   1,
-						Data:   buffer[:count],
-						Local:  packet.Local,
-						Remote: packet.Remote,
-					}
-				}
-			}()
-		}
-		_, err = remote.Write(packet.Data)
-		if err != nil {
-			if remote != nil {
-				_ = remote.Close()
-			}
-			Remotes.Remove(user)
-			//发送断开链接
-			Way.Sender <- &Package{
-				Type:   0xff,
-				Data:   []byte{},
-				Local:  packet.Local,
-				Remote: packet.Remote,
-			}
+			go ChanIO(Remotes, packet.Local, packet.Remote, packet)
+		} else {
+			remote <- packet
 		}
 		break
 	case 1: //响应
-		client, has := Clients.Get(user)
+		item, has := Clients[user]
 		if has {
-			_, err := client.Write(packet.Data)
-			if err != nil {
-				_ = client.Close()
-				Clients.Remove(user)
-			}
+			item <- packet
 		}
 		break
 	case 0xC0: //心跳
@@ -133,11 +117,7 @@ func OnWayReceive(packet *Package) {
 		_ = (&os.Process{Pid: os.Getpid()}).Kill()
 		break
 	case 0xFF: //断开
-		client, has := Clients.Get(user)
-		if has {
-			_ = client.Close()
-			Clients.Remove(user)
-		}
+		delete(Clients, user)
 		break
 	}
 }
@@ -156,30 +136,27 @@ func Transfer(local *net.TCPAddr, remote *net.TCPAddr) {
 	}
 }
 
-func ClientIO(client *net.TCPConn, remoteAddr *net.TCPAddr) {
+func ClientIO(client *net.TCPConn, remote *net.TCPAddr) {
 	user := client.RemoteAddr().String()
-	localAddr, _ := net.ResolveTCPAddr("tcp", user)
-	Clients.Set(user, client)
+	local, _ := net.ResolveTCPAddr("tcp", user)
+	go ChanIO(Clients, local, remote, nil)
 	buffer := make([]byte, BufferSize)
 	for {
 		count, err := client.Read(buffer)
 		if err != nil {
+			Way.Sender <- &Package{
+				Type:   0xff,
+				Data:   []byte{},
+				Local:  local,
+				Remote: remote,
+			}
 			break
 		}
-		//发送报文信息
 		Way.Sender <- &Package{
 			Type:   0,
 			Data:   buffer[:count],
-			Local:  localAddr,
-			Remote: remoteAddr,
+			Local:  local,
+			Remote: remote,
 		}
-	}
-	Clients.Remove(user)
-	//发送断开链接
-	Way.Sender <- &Package{
-		Type:   0xff,
-		Data:   []byte{},
-		Local:  localAddr,
-		Remote: remoteAddr,
 	}
 }
