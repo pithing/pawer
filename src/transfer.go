@@ -12,7 +12,7 @@ var Clients = make(map[string]chan *Package)
 var Remotes = make(map[string]chan *Package)
 var BufferSize = 1024 * 512
 
-func ChanIO(source map[string]chan *Package, local *net.TCPAddr, remote *net.TCPAddr, packet *Package) {
+func RemoteChanIO(local *net.TCPAddr, remote *net.TCPAddr, packet *Package) {
 	disconnect := func() {
 		Way.Sender <- &Package{
 			Type:   0xff,
@@ -41,13 +41,10 @@ func ChanIO(source map[string]chan *Package, local *net.TCPAddr, remote *net.TCP
 	var client *net.TCPConn
 	var err error
 	for {
-		item := source[user]
+		item := Remotes[user]
 		if item == nil {
-			source[user] = make(chan *Package)
-			item = source[user]
-			if packet != nil {
-				item <- packet
-			}
+			Remotes[user] = make(chan *Package)
+			item = Remotes[user]
 			client, err = net.DialTCP("tcp", nil, remote)
 			if err != nil {
 				disconnect()
@@ -55,6 +52,13 @@ func ChanIO(source map[string]chan *Package, local *net.TCPAddr, remote *net.TCP
 			}
 			_ = client.SetKeepAlive(true)
 			go radix(client)
+			if packet != nil {
+				_, err = client.Write(packet.Data)
+				if err != nil {
+					disconnect()
+					break
+				}
+			}
 		}
 		select {
 		case packet := <-item:
@@ -99,7 +103,7 @@ func OnWayReceive(packet *Package) {
 	case 0: //请求
 		remote, has := Remotes[user]
 		if !has {
-			go ChanIO(Remotes, packet.Local, packet.Remote, packet)
+			go RemoteChanIO(packet.Local, packet.Remote, packet)
 		} else {
 			remote <- packet
 		}
@@ -139,7 +143,24 @@ func Transfer(local *net.TCPAddr, remote *net.TCPAddr) {
 func ClientIO(client *net.TCPConn, remote *net.TCPAddr) {
 	user := client.RemoteAddr().String()
 	local, _ := net.ResolveTCPAddr("tcp", user)
-	go ChanIO(Clients, local, remote, nil)
+	Clients[user] = make(chan *Package)
+	go func() {
+		for {
+			item, has := Clients[user]
+			if !has {
+				break
+			}
+			select {
+			case packet := <-item:
+				_, err := client.Write(packet.Data)
+				if err != nil {
+					_ = client.Close()
+					break
+				}
+				continue
+			}
+		}
+	}()
 	buffer := make([]byte, BufferSize)
 	for {
 		count, err := client.Read(buffer)
