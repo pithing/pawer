@@ -1,12 +1,16 @@
 package main
 
-import "net"
+import (
+	"net"
+)
 
 var Way = OneWay{
 	Version: Config.Version,
-}.Default(Config.Local, Config.Remote)
+}
 
 func main() {
+	Way.Default(Config.Local, Config.Remote)
+	Way.WayConnIO()
 	//开启本地监听服务
 	for _, link := range Config.Link {
 		local, err := net.ResolveTCPAddr("tcp", link.Local)
@@ -20,12 +24,10 @@ func main() {
 		go Transfer(local, remote)
 	}
 	//开启心跳
-	//go BreakHeart()
+	go BreakHeart()
 	//来自单向的数据包
-	for {
-		select {
-		case packet := <-Way.Reader:
-			OnWayReceive(packet)
-		}
+	Way.ReceiveAction = func(packet *Package) {
+		OnWayReceive(packet)
 	}
+	select {}
 }

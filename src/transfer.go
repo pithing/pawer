@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"net"
 	"os"
 	"time"
@@ -8,68 +9,48 @@ import (
 
 var Timer = time.Now().Unix()
 
-var Clients = make(map[string]chan *Package)
-var Remotes = make(map[string]chan *Package)
+var Clients = make(map[string]*net.TCPConn)
+var Remotes = make(map[string]*net.TCPConn)
 var BufferSize = 1024 * 512
 
 func RemoteChanIO(local *net.TCPAddr, remote *net.TCPAddr, packet *Package) {
 	disconnect := func() {
-		Way.Sender <- &Package{
+		Way.SendPacket(&Package{
 			Type:   0xff,
 			Data:   []byte{},
 			Local:  local,
 			Remote: remote,
-		}
-	}
-	radix := func(client *net.TCPConn) {
-		buffer := make([]byte, BufferSize)
-		for {
-			count, err := client.Read(buffer)
-			if err != nil {
-				disconnect()
-				break
-			}
-			Way.Sender <- &Package{
-				Type:   1,
-				Data:   buffer[:count],
-				Local:  local,
-				Remote: remote,
-			}
-		}
+		})
 	}
 	var user = local.String()
-	var client *net.TCPConn
 	var err error
+	Remotes[user], err = net.DialTCP("tcp", nil, remote)
+	var client = Remotes[user]
+	if err != nil {
+		disconnect()
+		return
+	}
+	_ = client.SetKeepAlive(true)
+	if packet != nil {
+		_, err = client.Write(packet.Data)
+		if err != nil {
+			disconnect()
+			return
+		}
+	}
+	buffer := make([]byte, BufferSize)
 	for {
-		item := Remotes[user]
-		if item == nil {
-			Remotes[user] = make(chan *Package)
-			item = Remotes[user]
-			client, err = net.DialTCP("tcp", nil, remote)
-			if err != nil {
-				disconnect()
-				break
-			}
-			_ = client.SetKeepAlive(true)
-			go radix(client)
-			if packet != nil {
-				_, err = client.Write(packet.Data)
-				if err != nil {
-					disconnect()
-					break
-				}
-			}
+		count, err := client.Read(buffer)
+		if err != nil {
+			disconnect()
+			break
 		}
-		select {
-		case packet := <-item:
-			_, err = client.Write(packet.Data)
-			if err != nil {
-				disconnect()
-				break
-			}
-			continue
-		}
-		break
+		Way.SendPacket(&Package{
+			Type:   1,
+			Data:   buffer[:count],
+			Local:  local,
+			Remote: remote,
+		})
 	}
 }
 
@@ -77,20 +58,20 @@ func BreakHeart() {
 	zero, _ := net.ResolveTCPAddr("tcp", "0.0.0.0:0")
 	for {
 		time.Sleep(time.Second * 28)
-		Way.Sender <- &Package{
+		Way.SendPacket(&Package{
 			Type:   0xC0,
 			Data:   []byte{},
 			Local:  zero,
 			Remote: zero,
-		}
+		})
 		//判断心跳
 		if time.Now().Unix()-Timer >= 60 {
-			Way.Sender <- &Package{
+			Way.SendPacket(&Package{
 				Type:   0xF0,
 				Data:   []byte{},
 				Local:  zero,
 				Remote: zero,
-			}
+			})
 			time.Sleep(time.Second * 5)
 			_ = (&os.Process{Pid: os.Getpid()}).Kill()
 		}
@@ -105,13 +86,13 @@ func OnWayReceive(packet *Package) {
 		if !has {
 			go RemoteChanIO(packet.Local, packet.Remote, packet)
 		} else {
-			remote <- packet
+			_, _ = remote.Write(packet.Data)
 		}
 		break
 	case 1: //响应
-		item, has := Clients[user]
+		client, has := Clients[user]
 		if has {
-			item <- packet
+			_, _ = client.Write(packet.Data)
 		}
 		break
 	case 0xC0: //心跳
@@ -137,47 +118,31 @@ func Transfer(local *net.TCPAddr, remote *net.TCPAddr) {
 		}
 		_ = client.SetKeepAlive(true)
 		go ClientIO(client, remote)
+		log.Println(client.RemoteAddr().String())
 	}
 }
 
 func ClientIO(client *net.TCPConn, remote *net.TCPAddr) {
 	user := client.RemoteAddr().String()
 	local, _ := net.ResolveTCPAddr("tcp", user)
-	Clients[user] = make(chan *Package)
-	go func() {
-		for {
-			item, has := Clients[user]
-			if !has {
-				break
-			}
-			select {
-			case packet := <-item:
-				_, err := client.Write(packet.Data)
-				if err != nil {
-					_ = client.Close()
-					break
-				}
-				continue
-			}
-		}
-	}()
 	buffer := make([]byte, BufferSize)
+	Clients[user] = client
 	for {
 		count, err := client.Read(buffer)
 		if err != nil {
-			Way.Sender <- &Package{
+			Way.SendPacket(&Package{
 				Type:   0xff,
 				Data:   []byte{},
 				Local:  local,
 				Remote: remote,
-			}
+			})
 			break
 		}
-		Way.Sender <- &Package{
+		Way.SendPacket(&Package{
 			Type:   0,
 			Data:   buffer[:count],
 			Local:  local,
 			Remote: remote,
-		}
+		})
 	}
 }
