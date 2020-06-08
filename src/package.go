@@ -11,8 +11,6 @@ import (
 	"strings"
 )
 
-var Config = ConfDefault()
-
 // 8 version
 // 1 type
 // 4 sip

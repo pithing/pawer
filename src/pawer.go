@@ -4,6 +4,7 @@ import (
 	"net"
 )
 
+var Config = ConfDefault()
 var Way = OneWay{
 	Version: Config.Version,
 }

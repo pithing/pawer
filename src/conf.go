@@ -3,6 +3,8 @@ package main
 import (
 	"io/ioutil"
 	"os"
+	"os/exec"
+	"path/filepath"
 
 	"runtime"
 
@@ -23,7 +25,17 @@ type Link struct {
 
 func ConfDefault() Conf {
 	var cf Conf
-	f, _ := os.OpenFile("./pawer.toml", os.O_RDONLY, 0)
+	f, err := os.OpenFile(GetCurPath()+"/pawer.toml", os.O_RDONLY, 0)
+	if err != nil {
+		if runtime.GOOS == "windows" {
+			f, err = os.OpenFile("C:/pawer.toml", os.O_RDONLY, 0)
+		} else {
+			f, err = os.OpenFile("/etc/pawer.toml", os.O_RDONLY, 0)
+		}
+		if err != nil {
+			panic(err)
+		}
+	}
 	defer f.Close()
 	b, _ := ioutil.ReadAll(f)
 	if runtime.GOOS == "windows" {
@@ -40,4 +52,10 @@ func ConfDefault() Conf {
 		}
 	}
 	return cf
+}
+func GetCurPath() string {
+	file, _ := exec.LookPath(os.Args[0])
+	path, _ := filepath.Abs(file)
+	rst := filepath.Dir(path)
+	return rst
 }
