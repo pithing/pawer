@@ -10,7 +10,6 @@ var Way = OneWay{
 
 func main() {
 	Way.Default(Config.Local, Config.Remote)
-	Way.WayConnIO()
 	//开启本地监听服务
 	for _, link := range Config.Link {
 		local, err := net.ResolveTCPAddr("tcp", link.Local)
@@ -29,5 +28,5 @@ func main() {
 	Way.ReceiveAction = func(packet *Package) {
 		OnWayReceive(packet)
 	}
-	select {}
+	Way.WayConnIO()
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"net"
 	"os"
 	"time"
@@ -118,7 +117,6 @@ func Transfer(local *net.TCPAddr, remote *net.TCPAddr) {
 		}
 		_ = client.SetKeepAlive(true)
 		go ClientIO(client, remote)
-		log.Println(client.RemoteAddr().String())
 	}
 }
 

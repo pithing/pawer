@@ -61,17 +61,38 @@ func IPAddrFromInt(ip uint32) string {
 
 func (packet *Package) Pack(writer *bufio.Writer) error {
 	packet.Version = Config.Version
-	var err error
-	err = binary.Write(writer, binary.BigEndian, packet.Version)
-	err = binary.Write(writer, binary.BigEndian, packet.Type)
-	err = binary.Write(writer, binary.BigEndian, uint32(IPAddrToInt(packet.Local.IP.String())))
-	err = binary.Write(writer, binary.BigEndian, uint16(packet.Local.Port))
-	err = binary.Write(writer, binary.BigEndian, uint32(IPAddrToInt(packet.Remote.IP.String())))
-	err = binary.Write(writer, binary.BigEndian, uint16(packet.Remote.Port))
-	err = binary.Write(writer, binary.BigEndian, int32(len(packet.Data)))
-	err = binary.Write(writer, binary.BigEndian, packet.Data)
-	err = writer.Flush()
-	return err
+	inner := func(data []byte) error {
+		var err error
+		err = binary.Write(writer, binary.BigEndian, packet.Version)
+		err = binary.Write(writer, binary.BigEndian, packet.Type)
+		err = binary.Write(writer, binary.BigEndian, uint32(IPAddrToInt(packet.Local.IP.String())))
+		err = binary.Write(writer, binary.BigEndian, uint16(packet.Local.Port))
+		err = binary.Write(writer, binary.BigEndian, uint32(IPAddrToInt(packet.Remote.IP.String())))
+		err = binary.Write(writer, binary.BigEndian, uint16(packet.Remote.Port))
+		err = binary.Write(writer, binary.BigEndian, int32(len(data)))
+		err = binary.Write(writer, binary.BigEndian, data)
+		return err
+	}
+	//长度大于 64*1024 需要切分
+	total := len(packet.Data)
+	maxsize := 64*1024 - 32
+	if total > maxsize {
+		scope := total / maxsize
+		if total%maxsize > 0 {
+			scope++
+		}
+		for i := 0; i < scope; i++ {
+			if i*maxsize+maxsize > total {
+				_ = inner(packet.Data[i*maxsize:])
+			} else {
+				_ = inner(packet.Data[i*maxsize : i*maxsize+maxsize])
+			}
+		}
+		return writer.Flush()
+	} else {
+		_ = inner(packet.Data)
+		return writer.Flush()
+	}
 }
 func (packet *Package) UnPack(reader io.Reader) error {
 	packet.Version = Config.Version

@@ -4,9 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"log"
 	"net"
-	"reflect"
-	"time"
 )
 
 type OneWay struct {
@@ -33,78 +32,57 @@ func (way *OneWay) Default(localAddr string, remoteAddr string) {
 	}
 }
 func (way *OneWay) WayConnIO() {
-	//解决链接问题
-	go func() {
-		var err error
-		for {
-			if way.RemoteAddr.String() == "0.0.0.0:0" {
-				//不链接远端，接收到conn后使用此链接发送和接收数据
-				way.remote = way.local
-				if way.remote == nil {
-					time.Sleep(time.Second)
-					continue
+	ScannerSync := func(conn *net.TCPConn) {
+		scanner := bufio.NewScanner(conn)
+		scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+			header := len(way.Version) + 17
+			if !atEOF && len(data) > header {
+				index := bytes.Index(data, way.Version[:])
+				if index < 0 {
+					return
+				}
+				length := int32(0)
+				_ = binary.Read(bytes.NewReader(data[index+header-4:index+header]), binary.BigEndian, &length)
+				total := header + int(length)
+				if index+total <= len(data) {
+					return index + total, data[index : index+total], nil
 				}
 			}
-			if reflect.ValueOf(way.remote).IsNil() || err != nil {
-				way.remote, err = net.DialTCP("tcp", nil, way.RemoteAddr)
-			}
-			if err == nil {
-				err = way.remote.SetKeepAlive(true)
-			}
-			time.Sleep(5 * time.Second)
-		}
-	}()
-	go func() {
-		var local net.Conn
-		var listener *net.TCPListener
-		var err error
-		if way.LocalAddr.String() != "0.0.0.0:0" {
-			listener, err = net.ListenTCP("tcp", way.LocalAddr)
+			return
+		})
+		for scanner.Scan() {
+			packet := new(Package)
+			err := packet.UnPack(bytes.NewReader(scanner.Bytes()))
 			if err != nil {
-				panic(err)
+				break
+			}
+			if way.ReceiveAction != nil {
+				way.ReceiveAction(packet)
 			}
 		}
-		for {
-			if way.LocalAddr.String() != "0.0.0.0:0" {
-				way.local, err = listener.AcceptTCP()
-				local = way.local
-			} else {
-				//本地不监听，主动链接后使用链接的conn发送和接收数据
-				local = way.remote
-			}
-			if err != nil || reflect.ValueOf(local).IsNil() {
-				time.Sleep(time.Second)
-				continue
-			}
-			scanner := bufio.NewScanner(local)
-			scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
-				header := len(way.Version) + 17
-				if !atEOF && len(data) > header {
-					index := bytes.Index(data, way.Version[:])
-					if index < 0 {
-						return
-					}
-					length := int32(0)
-					_ = binary.Read(bytes.NewReader(data[index+header-4:index+header]), binary.BigEndian, &length)
-					total := header + int(length)
-					if index+total <= len(data) {
-						return index + total, data[index : index+total], nil
-					}
-				}
-				return
-			})
-			for scanner.Scan() {
-				packet := new(Package)
-				err = packet.UnPack(bytes.NewReader(scanner.Bytes()))
-				if way.ReceiveAction != nil {
-					way.ReceiveAction(packet)
-				}
-			}
-			if err := scanner.Err(); err != nil {
-				_ = local.Close()
-			}
-		}
-	}()
+		log.Printf(scanner.Err().Error())
+		_ = conn.Close()
+	}
+
+	var err error
+	var listener *net.TCPListener
+	//解决链接问题
+	if way.LocalAddr.String() == "0.0.0.0:0" {
+		way.remote, err = net.DialTCP("tcp", nil, way.RemoteAddr)
+		way.local = way.remote
+	} else if way.RemoteAddr.String() == "0.0.0.0:0" {
+		listener, err = net.ListenTCP("tcp", way.LocalAddr)
+		way.local, err = listener.AcceptTCP()
+		way.remote = way.local
+	} else {
+		listener, err = net.ListenTCP("tcp", way.LocalAddr)
+		way.remote, err = net.DialTCP("tcp", nil, way.RemoteAddr)
+		way.local, err = listener.AcceptTCP()
+	}
+	if err != nil {
+		panic(err)
+	}
+	ScannerSync(way.local)
 }
 
 //发送数据包
