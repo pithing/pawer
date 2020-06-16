@@ -3,13 +3,14 @@ package main
 import (
 	"net"
 	"os"
+	"sync"
 	"time"
 )
 
 var Timer = time.Now().Unix()
 
-var Clients = make(map[string]*net.TCPConn)
-var Remotes = make(map[string]*net.TCPConn)
+var Clients sync.Map
+var Remotes sync.Map
 var BufferSize = 1024 * 512
 
 func RemoteChanIO(local *net.TCPAddr, remote *net.TCPAddr, packet *Package) {
@@ -23,8 +24,8 @@ func RemoteChanIO(local *net.TCPAddr, remote *net.TCPAddr, packet *Package) {
 	}
 	var user = local.String()
 	var err error
-	Remotes[user], err = net.DialTCP("tcp", nil, remote)
-	var client = Remotes[user]
+	client, err := net.DialTCP("tcp", nil, remote)
+	Remotes.Store(user, client)
 	if err != nil {
 		disconnect()
 		return
@@ -39,17 +40,19 @@ func RemoteChanIO(local *net.TCPAddr, remote *net.TCPAddr, packet *Package) {
 	}
 	buffer := make([]byte, BufferSize)
 	for {
-		count, err := client.Read(buffer)
-		if err != nil {
-			disconnect()
-			break
+		if v, ok := Remotes.Load(user); ok {
+			count, err := v.(*net.TCPConn).Read(buffer)
+			if err != nil {
+				disconnect()
+				break
+			}
+			Way.SendPacket(&Package{
+				Type:   1,
+				Data:   buffer[:count],
+				Local:  local,
+				Remote: remote,
+			})
 		}
-		Way.SendPacket(&Package{
-			Type:   1,
-			Data:   buffer[:count],
-			Local:  local,
-			Remote: remote,
-		})
 	}
 }
 
@@ -81,17 +84,15 @@ func OnWayReceive(packet *Package) {
 	user := packet.Local.String()
 	switch packet.Type {
 	case 0: //请求
-		remote, has := Remotes[user]
-		if !has {
-			go RemoteChanIO(packet.Local, packet.Remote, packet)
+		if remote, ok := Remotes.Load(user); ok {
+			_, _ = remote.(*net.TCPConn).Write(packet.Data)
 		} else {
-			_, _ = remote.Write(packet.Data)
+			go RemoteChanIO(packet.Local, packet.Remote, packet)
 		}
 		break
 	case 1: //响应
-		client, has := Clients[user]
-		if has {
-			_, _ = client.Write(packet.Data)
+		if client, ok := Clients.Load(user); ok {
+			_, _ = client.(*net.TCPConn).Write(packet.Data)
 		}
 		break
 	case 0xC0: //心跳
@@ -101,7 +102,7 @@ func OnWayReceive(packet *Package) {
 		_ = (&os.Process{Pid: os.Getpid()}).Kill()
 		break
 	case 0xFF: //断开
-		delete(Clients, user)
+		Clients.Delete(user)
 		break
 	}
 }
@@ -116,31 +117,36 @@ func Transfer(local *net.TCPAddr, remote *net.TCPAddr) {
 			panic(err)
 		}
 		_ = client.SetKeepAlive(true)
+		Clients.Store(client.RemoteAddr().String(), client)
 		go ClientIO(client, remote)
 	}
 }
 
 func ClientIO(client *net.TCPConn, remote *net.TCPAddr) {
+	defer client.Close()
 	user := client.RemoteAddr().String()
 	local, _ := net.ResolveTCPAddr("tcp", user)
 	buffer := make([]byte, BufferSize)
-	Clients[user] = client
 	for {
-		count, err := client.Read(buffer)
-		if err != nil {
+		if client, ok := Clients.Load(user); ok {
+			count, err := client.(*net.TCPConn).Read(buffer)
+			if err != nil {
+				Way.SendPacket(&Package{
+					Type:   0xff,
+					Data:   []byte{},
+					Local:  local,
+					Remote: remote,
+				})
+				break
+			}
 			Way.SendPacket(&Package{
-				Type:   0xff,
-				Data:   []byte{},
+				Type:   0,
+				Data:   buffer[:count],
 				Local:  local,
 				Remote: remote,
 			})
+		} else {
 			break
 		}
-		Way.SendPacket(&Package{
-			Type:   0,
-			Data:   buffer[:count],
-			Local:  local,
-			Remote: remote,
-		})
 	}
 }
