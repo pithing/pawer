@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"container/list"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // 8 version
@@ -112,4 +114,38 @@ func (packet *Package) UnPack(reader io.Reader) error {
 	packet.Data = make([]byte, length)
 	err = binary.Read(reader, binary.BigEndian, &packet.Data)
 	return err
+}
+
+type PackageQueue struct {
+	Lock sync.Mutex
+	Data *list.List
+}
+
+func (pq *PackageQueue) PushOne(v *Package) {
+	pq.Lock.Lock()
+	defer pq.Lock.Unlock()
+	pq.Data.PushFront(v)
+}
+func (pq *PackageQueue) Push(v []*Package) {
+	pq.Lock.Lock()
+	defer pq.Lock.Unlock()
+	for _, item := range v {
+		pq.Data.PushFront(item)
+	}
+}
+func (pq *PackageQueue) Pop() []*Package {
+	pq.Lock.Lock()
+	defer pq.Lock.Unlock()
+	total := pq.Data.Len()
+	var result []*Package
+	for i := 0; i < total; i++ {
+		tmp := pq.Data.Back()
+		v := tmp.Value
+		pq.Data.Remove(tmp)
+		result = append(result, v.(*Package))
+	}
+	if result == nil {
+		return make([]*Package, 0)
+	}
+	return result
 }

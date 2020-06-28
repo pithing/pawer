@@ -13,12 +13,11 @@ type OneWay struct {
 	local  *net.TCPConn //单向本地监听
 	remote *net.TCPConn //单向远端链接
 	//public
-	LocalAddr     *net.TCPAddr //单向本地监听地址
-	RemoteAddr    *net.TCPAddr //单向远端链接地址
-	Version       [8]byte
-	ReceiveAction ReceiveFunc //单向接收回调
+	LocalAddr  *net.TCPAddr //单向本地监听地址
+	RemoteAddr *net.TCPAddr //单向远端链接地址
+	Version    [8]byte
+	Receive    *PackageQueue //单向接收队列
 }
-type ReceiveFunc func(*Package)
 
 func (way *OneWay) Default(localAddr string, remoteAddr string) {
 	var err error
@@ -56,9 +55,7 @@ func (way *OneWay) WayConnIO() {
 			if err != nil {
 				break
 			}
-			if way.ReceiveAction != nil {
-				way.ReceiveAction(packet)
-			}
+			way.Receive.PushOne(packet)
 		}
 		log.Printf(scanner.Err().Error())
 		_ = conn.Close()

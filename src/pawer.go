@@ -1,12 +1,19 @@
 package main
 
 import (
+	"container/list"
 	"net"
+	"sync"
+	"time"
 )
 
 var Config = ConfDefault()
 var Way = OneWay{
 	Version: Config.Version,
+	Receive: &PackageQueue{
+		Data: &list.List{},
+		Lock: sync.Mutex{},
+	},
 }
 
 func main() {
@@ -26,8 +33,14 @@ func main() {
 	//开启心跳
 	go BreakHeart()
 	//来自单向的数据包
-	Way.ReceiveAction = func(packet *Package) {
-		OnWayReceive(packet)
+	go Way.WayConnIO()
+	for true {
+		packets := Way.Receive.Pop()
+		for _, packet := range packets {
+			OnWayReceive(packet)
+		}
+		if len(packets) == 0 {
+			time.Sleep(time.Second / 100)
+		}
 	}
-	Way.WayConnIO()
 }

@@ -11,7 +11,7 @@ var Timer = time.Now().Unix()
 
 var Clients sync.Map
 var Remotes sync.Map
-var BufferSize = 1024 * 512
+var BufferSize = 5 * 1024 * 1024
 
 func RemoteChanIO(local *net.TCPAddr, remote *net.TCPAddr, packet *Package) {
 	disconnect := func() {
